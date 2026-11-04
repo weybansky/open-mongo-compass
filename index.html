@@ -1,0 +1,432 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Open Mongo Compass</title>
+<style>
+  :root {
+    color-scheme: light dark;
+    --bg: #f6f7f8; --panel: #ffffff; --line: #dfe3e6; --text: #1c2529; --muted: #62707a;
+    --accent: #00684a; --accent-text: #ffffff; --hover: #eef1f3; --selected: #dff3ea; --danger: #b3261e;
+    --key: #0b5cad; --string: #00684a; --number: #a64b00; --literal: #7a3fb0;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #12181c; --panel: #1a2227; --line: #2f3a41; --text: #e4e9ec; --muted: #94a3ad;
+      --accent: #2fbf8a; --accent-text: #06231a; --hover: #232d33; --selected: #17382c; --danger: #ff8a80;
+      --key: #7ab8f5; --string: #6fd6ab; --number: #f0ae72; --literal: #c9a2ee;
+    }
+  }
+  * { box-sizing: border-box; }
+  [hidden] { display: none !important; }
+  html, body { height: 100%; margin: 0; }
+  body { background: var(--bg); color: var(--text); font: 14px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+  code, pre, textarea, .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 13px; }
+  h1 { font-size: 20px; margin: 0 0 4px; }
+  label { display: block; font-size: 12px; font-weight: 600; color: var(--muted); margin-bottom: 4px; }
+  input, textarea {
+    width: 100%; padding: 7px 9px; color: var(--text); background: var(--panel);
+    border: 1px solid var(--line); border-radius: 6px; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 13px;
+  }
+  textarea { resize: vertical; }
+  input[type=checkbox] { width: auto; margin: 0; }
+  input:focus, textarea:focus, button:focus-visible, summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+  button { font: inherit; padding: 6px 11px; color: var(--text); background: var(--panel); border: 1px solid var(--line); border-radius: 6px; cursor: pointer; }
+  button:hover:not(:disabled) { background: var(--hover); }
+  button:disabled { opacity: .5; cursor: default; }
+  button.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-text); font-weight: 600; }
+  button.primary:hover:not(:disabled) { background: var(--accent); filter: brightness(1.1); }
+  .muted { color: var(--muted); }
+  .error { color: var(--danger); white-space: pre-wrap; overflow-wrap: anywhere; margin: 8px 0 0; }
+
+  #connect { max-width: 640px; margin: 10vh auto 0; padding: 0 16px; }
+  .card { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 18px; margin-top: 16px; }
+  .check { display: flex; align-items: center; gap: 6px; font-size: 13px; font-weight: 400; color: var(--text); margin: 10px 0 14px; }
+  .saved { display: flex; gap: 6px; margin-top: 6px; }
+  .saved button:first-child { flex: 1; min-width: 0; text-align: left; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+  #main { display: grid; grid-template: auto 1fr / 260px 1fr; height: 100%; }
+  header { grid-column: 1 / -1; display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 8px 14px; background: var(--panel); border-bottom: 1px solid var(--line); }
+  header strong { white-space: nowrap; }
+  #host { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  aside { background: var(--panel); border-right: 1px solid var(--line); overflow: auto; padding: 8px; min-height: 0; }
+  summary { padding: 4px 6px; border-radius: 5px; cursor: pointer; font-weight: 600; overflow-wrap: anywhere; }
+  summary:hover { background: var(--hover); }
+  .coll { display: block; width: 100%; text-align: left; padding: 3px 6px 3px 20px; border: 0; background: none; overflow-wrap: anywhere; }
+  .coll.active { background: var(--selected); font-weight: 600; }
+  .note { padding: 3px 6px 3px 20px; font-size: 13px; }
+
+  #workspace { display: flex; flex-direction: column; min-width: 0; min-height: 0; overflow: hidden; }
+  #query { padding: 12px 14px; border-bottom: 1px solid var(--line); background: var(--panel); }
+  .query-grid { display: grid; grid-template-columns: 1fr 1fr 90px auto; gap: 8px; align-items: end; margin-top: 8px; }
+  #title { font-weight: 600; overflow-wrap: anywhere; }
+  #toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 8px 14px; border-bottom: 1px solid var(--line); }
+  #range { margin-right: auto; }
+  #results { flex: 1; overflow: auto; padding: 12px 14px; min-height: 0; }
+  .empty { padding: 40px 0; text-align: center; color: var(--muted); }
+
+  .doc { position: relative; background: var(--panel); border: 1px solid var(--line); border-radius: 6px; margin-bottom: 8px; }
+  .doc pre { margin: 0; padding: 10px 12px; white-space: pre-wrap; overflow-wrap: anywhere; }
+  .doc button { position: absolute; top: 6px; right: 6px; padding: 2px 8px; font-size: 12px; }
+  .k { color: var(--key); } .s { color: var(--string); } .n { color: var(--number); } .l { color: var(--literal); }
+  table { border-collapse: collapse; background: var(--panel); font-size: 13px; }
+  th, td { border: 1px solid var(--line); padding: 4px 8px; text-align: left; max-width: 320px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  th { position: sticky; top: -12px; background: var(--hover); }
+
+  @media (max-width: 760px) {
+    #main { grid-template: auto 180px 1fr / 1fr; }
+    aside { border-right: 0; border-bottom: 1px solid var(--line); }
+    .query-grid { grid-template-columns: 1fr 1fr; }
+  }
+</style>
+</head>
+<body>
+
+<section id="connect">
+  <h1>Open Mongo Compass</h1>
+  <div class="muted">A small, read-only MongoDB and Cosmos DB browser.</div>
+  <form id="connect-form" class="card">
+    <label for="uri">Connection string</label>
+    <textarea id="uri" rows="4" required spellcheck="false" autocomplete="off" placeholder="mongodb://user:password@host:27017/?tls=true"></textarea>
+    <label class="check"><input type="checkbox" id="remember"> Save in this browser (stored unencrypted, including any password)</label>
+    <button class="primary" id="connect-btn">Connect</button>
+    <p class="error" id="connect-error" hidden></p>
+  </form>
+  <div class="card" id="saved-card" hidden>
+    <label>Saved connections</label>
+    <div id="saved"></div>
+  </div>
+</section>
+
+<section id="main" hidden>
+  <header>
+    <strong>Open Mongo Compass</strong>
+    <span id="host" class="muted mono"></span>
+    <button id="disconnect">Disconnect</button>
+  </header>
+  <aside id="tree" aria-label="Databases and collections"></aside>
+  <div id="workspace">
+    <form id="query" hidden>
+      <div id="title"></div>
+      <div style="margin-top:8px">
+        <label for="filter">Filter</label>
+        <input id="filter" spellcheck="false" autocomplete="off" placeholder='{ status: "active", name: /smith/i, _id: ObjectId("...") }'>
+      </div>
+      <div class="query-grid">
+        <div><label for="projection">Projection</label><input id="projection" spellcheck="false" autocomplete="off" placeholder="{ name: 1, email: 1 }"></div>
+        <div><label for="sort">Sort</label><input id="sort" spellcheck="false" autocomplete="off" placeholder="{ createdAt: -1 }"></div>
+        <div><label for="limit">Limit</label><input id="limit" type="number" min="1" max="1000" value="50"></div>
+        <button class="primary" id="run">Find</button>
+      </div>
+      <p class="error" id="query-error" hidden></p>
+    </form>
+    <div id="toolbar" hidden>
+      <span id="range" class="muted"></span>
+      <button id="count" type="button">Count matches</button>
+      <button id="view" type="button">Table view</button>
+      <button id="download" type="button">Download JSON</button>
+      <button id="prev" type="button">Previous</button>
+      <button id="next" type="button">Next</button>
+    </div>
+    <div id="results"><div class="empty">Pick a collection on the left.</div></div>
+  </div>
+</section>
+
+<script>
+const $ = id => document.getElementById(id);
+const SAVED_KEY = "omc.saved";
+const state = { conn: null, db: null, coll: null, skip: 0, docs: [], hasMore: false, view: "list", seq: 0 };
+
+function el(tag, props = {}, ...children) {
+  const node = Object.assign(document.createElement(tag), props);
+  node.append(...children);
+  return node;
+}
+
+function showError(id, message) {
+  $(id).textContent = message || "";
+  $(id).hidden = !message;
+}
+
+async function api(path, body) {
+  const res = await fetch("/api/" + path, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  const data = await res.json().catch(() => ({ detail: "Unexpected server response (" + res.status + ")" }));
+  if (res.status === 404 && state.conn) {   // The server restarted and lost the connection.
+    showScreen(false);
+    showError("connect-error", data.detail);
+  }
+  if (!res.ok) {
+    const detail = Array.isArray(data.detail) ? data.detail.map(d => d.loc.at(-1) + ": " + d.msg).join("\n") : data.detail;
+    throw new Error(detail);
+  }
+  return data;
+}
+
+/* ---------- Saved connections ---------- */
+
+function hostLabel(uri) {
+  return uri.replace(/\/\/[^@/]*@/, "//").split("?")[0];
+}
+
+function readSaved() {
+  try { return JSON.parse(localStorage.getItem(SAVED_KEY)) || []; } catch { return []; }
+}
+
+function writeSaved(list) {
+  try { localStorage.setItem(SAVED_KEY, JSON.stringify(list)); } catch {}
+  renderSaved();
+}
+
+function renderSaved() {
+  const list = readSaved();
+  $("saved-card").hidden = !list.length;
+  $("saved").replaceChildren(...list.map(uri => el("div", { className: "saved" },
+    el("button", { type: "button", className: "mono", textContent: hostLabel(uri), title: hostLabel(uri), onclick: () => connect(uri) }),
+    el("button", { type: "button", textContent: "Remove", onclick: () => writeSaved(readSaved().filter(u => u !== uri)) }),
+  )));
+}
+
+/* ---------- Connecting ---------- */
+
+function showScreen(connected) {
+  $("connect").hidden = connected;
+  $("main").hidden = !connected;
+  if (!connected) state.conn = null;
+}
+
+async function connect(uri) {
+  showError("connect-error", "");
+  $("connect-btn").disabled = true;
+  $("connect-btn").textContent = "Connecting…";
+  try {
+    const data = await api("connect", { uri });
+    if ($("remember").checked && !readSaved().includes(uri)) writeSaved([...readSaved(), uri]);
+    Object.assign(state, { conn: data.conn, db: null, coll: null, docs: [] });
+    $("uri").value = "";
+    $("host").textContent = hostLabel(uri);
+    $("query").hidden = $("toolbar").hidden = true;
+    $("results").replaceChildren(el("div", { className: "empty", textContent: "Pick a collection on the left." }));
+    renderTree(data.databases);
+    showScreen(true);
+  } catch (err) {
+    showError("connect-error", err.message);
+  } finally {
+    $("connect-btn").disabled = false;
+    $("connect-btn").textContent = "Connect";
+  }
+}
+
+$("connect-form").onsubmit = event => {
+  event.preventDefault();
+  connect($("uri").value.trim());
+};
+
+$("disconnect").onclick = () => {
+  api("disconnect", { conn: state.conn }).catch(() => {});
+  showScreen(false);
+};
+
+/* ---------- Database tree ---------- */
+
+function renderTree(databases) {
+  if (!databases.length) {
+    $("tree").replaceChildren(el("div", { className: "note muted", textContent: "No databases found." }));
+    return;
+  }
+  $("tree").replaceChildren(...databases.map(db => {
+    const list = el("div");
+    const details = el("details", {}, el("summary", { textContent: db }), list);
+    details.addEventListener("toggle", async () => {
+      if (!details.open || details.dataset.loaded) return;
+      list.replaceChildren(el("div", { className: "note muted", textContent: "Loading…" }));
+      try {
+        const { collections } = await api("collections", { conn: state.conn, db });
+        details.dataset.loaded = "1";
+        list.replaceChildren(...(collections.length
+          ? collections.map(coll => el("button", { className: "coll", type: "button", textContent: coll, onclick: event => openCollection(db, coll, event.target) }))
+          : [el("div", { className: "note muted", textContent: "No collections" })]));
+      } catch (err) {
+        list.replaceChildren(el("div", { className: "note error", textContent: err.message }));
+      }
+    });
+    return details;
+  }));
+}
+
+function openCollection(db, coll, button) {
+  document.querySelectorAll(".coll.active").forEach(b => b.classList.remove("active"));
+  button.classList.add("active");
+  Object.assign(state, { db, coll });
+  $("title").textContent = db + " / " + coll;
+  $("query").hidden = false;
+  $("filter").value = $("projection").value = $("sort").value = "";
+  runQuery(0);
+}
+
+/* ---------- Querying ---------- */
+
+// Accepts shell-style input (unquoted keys, ObjectId("..."), /regex/, new Date(...)) and
+// returns Extended JSON for the server. It runs only what you type, in your own browser.
+function toExtendedJson(text, name) {
+  if (!text.trim()) return "{}";
+  const shell = {
+    ObjectId: function (id) { return { $oid: id }; },
+    ISODate: function (date) { return date ? new Date(date) : new Date(); },
+    NumberLong: function (n) { return { $numberLong: String(n) }; },
+    NumberDecimal: function (n) { return { $numberDecimal: String(n) }; },
+  };
+  let value;
+  try {
+    value = new Function(...Object.keys(shell), '"use strict"; return (' + text + "\n);")(...Object.values(shell));
+  } catch (err) {
+    throw new Error(name + " is not valid: " + err.message);
+  }
+  if (value === null || typeof value !== "object" || Array.isArray(value)) throw new Error(name + " must be an object, like { a: 1 }");
+  return JSON.stringify(value, function (key, val) {
+    const raw = this[key];
+    if (raw instanceof RegExp) return { $regex: raw.source, $options: raw.flags.replace(/[gyd]/g, "") };
+    if (raw instanceof Date) return { $date: raw.toISOString() };
+    return val;
+  });
+}
+
+function queryBody() {
+  return {
+    conn: state.conn, db: state.db, coll: state.coll,
+    filter: toExtendedJson($("filter").value, "Filter"),
+    projection: toExtendedJson($("projection").value, "Projection"),
+    sort: toExtendedJson($("sort").value, "Sort"),
+  };
+}
+
+function setBusy(busy) {
+  $("run").disabled = busy;
+  $("run").textContent = busy ? "Finding…" : "Find";
+}
+
+async function runQuery(skip) {
+  const seq = ++state.seq;   // Ignore this response if a newer query starts first.
+  showError("query-error", "");
+  setBusy(true);
+  try {
+    const limit = Math.min(1000, Math.max(1, parseInt($("limit").value, 10) || 50));
+    $("limit").value = limit;
+    const data = await api("find", { ...queryBody(), skip, limit });
+    if (seq !== state.seq) return;
+    Object.assign(state, { docs: data.docs, hasMore: data.has_more, skip });
+    $("count").textContent = "Count matches";
+    $("count").disabled = false;
+    render();
+  } catch (err) {
+    if (seq === state.seq) showError("query-error", err.message);
+  } finally {
+    if (seq === state.seq) setBusy(false);
+  }
+}
+
+$("query").onsubmit = event => {
+  event.preventDefault();
+  runQuery(0);
+};
+$("prev").onclick = () => runQuery(Math.max(0, state.skip - (parseInt($("limit").value, 10) || 50)));
+$("next").onclick = () => runQuery(state.skip + state.docs.length);
+
+$("count").onclick = async () => {
+  const button = $("count");
+  button.disabled = true;
+  button.textContent = "Counting…";
+  try {
+    const { count, estimated } = await api("count", queryBody());
+    button.textContent = (estimated ? "About " : "") + count.toLocaleString() + (count === 1 ? " match" : " matches");
+  } catch (err) {
+    button.textContent = "Count matches";
+    button.disabled = false;
+    showError("query-error", err.message);
+  }
+};
+
+/* ---------- Results ---------- */
+
+$("view").onclick = () => {
+  state.view = state.view === "list" ? "table" : "list";
+  render();
+};
+
+$("download").onclick = () => {
+  const url = URL.createObjectURL(new Blob([JSON.stringify(state.docs, null, 2)], { type: "application/json" }));
+  el("a", { href: url, download: state.db + "." + state.coll + ".json" }).click();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+};
+
+function render() {
+  const { docs, skip, hasMore, view } = state;
+  $("toolbar").hidden = false;
+  $("range").textContent = docs.length ? `Showing ${skip + 1}–${skip + docs.length}` : "No documents";
+  $("prev").disabled = skip === 0;
+  $("next").disabled = !hasMore;
+  $("download").disabled = !docs.length;
+  $("view").textContent = view === "list" ? "Table view" : "List view";
+  $("results").scrollTop = 0;
+  if (!docs.length) {
+    $("results").replaceChildren(el("div", { className: "empty", textContent: "No documents match this query." }));
+  } else {
+    $("results").replaceChildren(view === "list" ? renderList(docs) : renderTable(docs));
+  }
+}
+
+function renderList(docs) {
+  const wrap = el("div");
+  docs.forEach(doc => {
+    const json = JSON.stringify(doc, null, 2);
+    const copy = el("button", { type: "button", textContent: "Copy" });
+    copy.onclick = async () => {
+      try {
+        await navigator.clipboard.writeText(json);
+        copy.textContent = "Copied";
+      } catch {
+        copy.textContent = "Copy failed";
+      }
+      setTimeout(() => { copy.textContent = "Copy"; }, 1200);
+    };
+    wrap.append(el("div", { className: "doc" }, copy, el("pre", { innerHTML: highlight(json) })));
+  });
+  return wrap;
+}
+
+// Escapes HTML first, because document values are untrusted and this goes into innerHTML.
+function highlight(json) {
+  const escaped = json.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  return escaped.replace(/("(?:\\.|[^"\\])*")(:)?|\b(?:true|false|null)\b|-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?/g, (match, str, colon) => {
+    if (str) return colon ? `<span class="k">${str}</span>:` : `<span class="s">${str}</span>`;
+    return `<span class="${/^[tfn]/.test(match) ? "l" : "n"}">${match}</span>`;
+  });
+}
+
+function cellText(value) {
+  if (value === undefined) return "";
+  if (value === null || typeof value !== "object") return String(value);
+  const keys = Object.keys(value);
+  if (keys.length === 1 && ["$oid", "$date", "$numberLong", "$numberDecimal"].includes(keys[0]) && typeof value[keys[0]] !== "object") return String(value[keys[0]]);
+  return JSON.stringify(value);
+}
+
+function renderTable(docs) {
+  const columns = [...new Set(docs.flatMap(doc => Object.keys(doc)))];
+  return el("table", {},
+    el("thead", {}, el("tr", {}, ...columns.map(c => el("th", { textContent: c, title: c })))),
+    el("tbody", {}, ...docs.map(doc => el("tr", {}, ...columns.map(c => {
+      const text = cellText(doc[c]);
+      return el("td", { textContent: text, title: text });
+    })))),
+  );
+}
+
+renderSaved();
+</script>
+</body>
+</html>
