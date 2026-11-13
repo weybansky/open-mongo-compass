@@ -111,7 +111,8 @@ def handle_query_error(_: Request, error: Exception) -> JSONResponse:
 
 @app.get("/")
 def index() -> FileResponse:
-    return FileResponse(Path(__file__).with_name("index.html"))
+    # Set the type explicitly: on Windows, Python guesses it from the registry, which can be wrong.
+    return FileResponse(Path(__file__).with_name("index.html"), media_type="text/html; charset=utf-8")
 
 
 @app.post("/api/connect")
@@ -257,4 +258,5 @@ def download_export(token: str) -> StreamingResponse:
 
 if __name__ == "__main__":
     print(f"Open Mongo Compass: http://{HOST}:{PORT}")
-    uvicorn.run(app, host=HOST, port=PORT, log_level="warning")
+    print("Each request the browser makes is listed below. If none appear, the browser isn't reaching this app.")
+    uvicorn.run(app, host=HOST, port=PORT, log_level="info")
