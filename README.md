@@ -39,7 +39,15 @@ Filters accept shell-style syntax as well as JSON:
 { createdAt: { $gte: ISODate("2026-01-01") } }
 ```
 
-You can switch between list and table views, page through results, copy a document, or download the current page as JSON. Each page holds up to 1000 documents.
+You can switch between list and table views, page through results, and copy a document. Each page holds up to 1000 documents.
+
+The **Download** menu saves the results of the query you last ran, including its filter, projection and sort:
+
+- **This page as JSON:** just the documents on screen.
+- **All matches as JSON:** every matching document, streamed into an [Extended JSON](https://www.mongodb.com/docs/manual/reference/mongodb-extended-json/) array that `mongoimport --jsonArray` can load.
+- **All matches as CSV:** every matching document, with nested fields as dotted columns like `address.city` and arrays as JSON text. The CSV opens in Excel. The download only starts filling once the whole query has run, because the header needs every column.
+
+Exports show the match count and ask you to confirm first. Progress shows in your browser's downloads list. If the database stops responding mid-export, the browser marks the download as failed.
 
 **Count matches** only runs when you click it, because counting a large collection can use a lot of Cosmos DB request units. With an empty filter it shows a fast estimate.
 

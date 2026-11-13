@@ -1,18 +1,24 @@
 """Open Mongo Compass: a small read-only MongoDB browser. Run with: python app.py"""
 
+import csv
+import io
+import json
 import os
+import tempfile
 import uuid
 from pathlib import Path
-from typing import Dict
+from typing import Dict, Iterator, Literal
+from urllib.parse import quote
 
 import uvicorn
 from bson import json_util
 from bson.errors import BSONError
 from bson.json_util import RELAXED_JSON_OPTIONS
 from fastapi import FastAPI, HTTPException, Request
-from fastapi.responses import FileResponse, JSONResponse, Response
+from fastapi.responses import FileResponse, JSONResponse, Response, StreamingResponse
 from pydantic import BaseModel, Field
 from pymongo import MongoClient
+from pymongo.cursor import Cursor
 from pymongo.errors import ConfigurationError, OperationFailure, PyMongoError
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 
@@ -25,6 +31,7 @@ app = FastAPI(title="Open Mongo Compass", docs_url=None, redoc_url=None, openapi
 app.add_middleware(TrustedHostMiddleware, allowed_hosts=["localhost", "127.0.0.1"])
 
 clients: Dict[str, MongoClient] = {}
+exports: Dict[str, "ExportBody"] = {}  # One-time download links, used once by the browser.
 
 
 class ConnectBody(BaseModel):
@@ -44,11 +51,18 @@ class CountBody(CollectionsBody):
     filter: str = "{}"
 
 
-class FindBody(CountBody):
+class QueryBody(CountBody):
     projection: str = "{}"
     sort: str = "{}"
+
+
+class FindBody(QueryBody):
     skip: int = Field(0, ge=0)
     limit: int = Field(50, ge=1, le=1000)
+
+
+class ExportBody(QueryBody):
+    format: Literal["json", "csv"] = "json"
 
 
 def get_client(conn: str) -> MongoClient:
@@ -131,18 +145,22 @@ def collections(body: CollectionsBody) -> dict:
     return {"collections": sorted(get_client(body.conn)[body.db].list_collection_names())}
 
 
+def build_cursor(body: QueryBody) -> Cursor:
+    cursor = get_client(body.conn)[body.db][body.coll].find(
+        parse_doc(body.filter, "Filter"), parse_doc(body.projection, "Projection") or None
+    )
+    sort = parse_doc(body.sort, "Sort")
+    return cursor.sort(list(sort.items())) if sort else cursor
+
+
 @app.post("/api/find")
 def find(body: FindBody) -> Response:
     cursor = (
-        get_client(body.conn)[body.db][body.coll]
-        .find(parse_doc(body.filter, "Filter"), parse_doc(body.projection, "Projection") or None)
+        build_cursor(body)
         .skip(body.skip)
         .limit(body.limit + 1)  # One extra tells us whether there is a next page.
         .max_time_ms(QUERY_TIMEOUT_MS)
     )
-    sort = parse_doc(body.sort, "Sort")
-    if sort:
-        cursor = cursor.sort(list(sort.items()))
     docs = list(cursor)
     payload = {"docs": keep_big_ints(docs[: body.limit]), "has_more": len(docs) > body.limit}
     return Response(json_util.dumps(payload, json_options=RELAXED_JSON_OPTIONS), media_type="application/json")
@@ -155,6 +173,86 @@ def count(body: CountBody) -> dict:
     if not query:
         return {"count": collection.estimated_document_count(maxTimeMS=QUERY_TIMEOUT_MS), "estimated": True}
     return {"count": collection.count_documents(query, maxTimeMS=QUERY_TIMEOUT_MS), "estimated": False}
+
+
+def in_chunks(pieces: Iterator[str], size: int = 256 * 1024) -> Iterator[str]:
+    """Group small strings so the response isn't sent one document at a time."""
+    buffer, length = [], 0
+    for piece in pieces:
+        buffer.append(piece)
+        length += len(piece)
+        if length >= size:
+            yield "".join(buffer)
+            buffer, length = [], 0
+    if buffer:
+        yield "".join(buffer)
+
+
+def json_lines(cursor: Cursor) -> Iterator[str]:
+    yield "["
+    for i, doc in enumerate(cursor):
+        yield ("," if i else "") + "\n" + json_util.dumps(keep_big_ints(doc), json_options=RELAXED_JSON_OPTIONS)
+    yield "\n]\n"
+
+
+def flatten(value, key: str, row: dict) -> None:
+    """Turn nested fields into dotted columns, like address.city."""
+    if isinstance(value, dict) and value and not any(k.startswith("$") for k in value):
+        for k, v in value.items():
+            flatten(v, f"{key}.{k}", row)
+    elif isinstance(value, dict) and len(value) == 1 and not isinstance(next(iter(value.values())), (dict, list)):
+        row[key] = next(iter(value.values()))  # {"$oid": "..."}, {"$date": "..."} and similar
+    elif isinstance(value, (dict, list)):
+        row[key] = json.dumps(value, ensure_ascii=False)
+    elif isinstance(value, bool):
+        row[key] = "true" if value else "false"
+    else:
+        row[key] = "null" if value is None else value
+
+
+def csv_lines(cursor: Cursor) -> Iterator[str]:
+    # The header needs every column, so rows go to a temporary file until the query finishes.
+    with tempfile.TemporaryFile("w+", encoding="utf-8") as rows:
+        columns: Dict[str, None] = {}
+        for doc in cursor:
+            row: dict = {}
+            for key, value in json.loads(json_util.dumps(doc, json_options=RELAXED_JSON_OPTIONS)).items():
+                flatten(value, key, row)
+            columns.update(dict.fromkeys(row))
+            rows.write(json.dumps(row) + "\n")
+        rows.seek(0)
+        out = io.StringIO()
+        writer = csv.DictWriter(out, fieldnames=list(columns))
+        writer.writeheader()
+        yield "﻿" + out.getvalue()  # The byte order mark makes Excel read the file as UTF-8.
+        for line in rows:
+            out.seek(0)
+            out.truncate()
+            writer.writerow(json.loads(line))
+            yield out.getvalue()
+
+
+@app.post("/api/export")
+def start_export(body: ExportBody) -> dict:
+    build_cursor(body)  # Report bad filters here, before the browser starts a download.
+    token = uuid.uuid4().hex
+    exports[token] = body
+    return {"token": token}
+
+
+@app.get("/api/export/{token}")
+def download_export(token: str) -> StreamingResponse:
+    body = exports.pop(token, None)
+    if body is None:
+        raise HTTPException(404, "This export has expired. Start it again.")
+    cursor = build_cursor(body)
+    lines = csv_lines(cursor) if body.format == "csv" else json_lines(cursor)
+    filename = quote(f"{body.db}.{body.coll}.{body.format}", safe="")
+    return StreamingResponse(
+        in_chunks(lines),
+        media_type="text/csv; charset=utf-8" if body.format == "csv" else "application/json",
+        headers={"Content-Disposition": f"attachment; filename*=UTF-8''{filename}"},
+    )
 
 
 if __name__ == "__main__":

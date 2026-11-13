@@ -63,6 +63,12 @@
   #title { font-weight: 600; overflow-wrap: anywhere; }
   #toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 8px 14px; border-bottom: 1px solid var(--line); }
   #range { margin-right: auto; }
+  .menu { position: relative; }
+  .menu summary { list-style: none; padding: 6px 11px; border: 1px solid var(--line); border-radius: 6px; background: var(--panel); font-weight: 400; }
+  .menu summary::-webkit-details-marker { display: none; }
+  .menu summary::after { content: " ▾"; color: var(--muted); }
+  .menu-items { position: absolute; right: 0; top: calc(100% + 4px); z-index: 5; display: flex; flex-direction: column; min-width: 200px; padding: 4px; background: var(--panel); border: 1px solid var(--line); border-radius: 8px; box-shadow: 0 6px 20px rgb(0 0 0 / .18); }
+  .menu-items button { border: 0; text-align: left; background: none; white-space: nowrap; }
   #results { flex: 1; overflow: auto; padding: 12px 14px; min-height: 0; }
   .empty { padding: 40px 0; text-align: center; color: var(--muted); }
 
@@ -125,7 +131,14 @@
       <span id="range" class="muted"></span>
       <button id="count" type="button">Count matches</button>
       <button id="view" type="button">Table view</button>
-      <button id="download" type="button">Download JSON</button>
+      <details class="menu" id="download-menu">
+        <summary>Download</summary>
+        <div class="menu-items">
+          <button type="button" id="download-page">This page as JSON</button>
+          <button type="button" class="export" data-format="json">All matches as JSON</button>
+          <button type="button" class="export" data-format="csv">All matches as CSV</button>
+        </div>
+      </details>
       <button id="prev" type="button">Previous</button>
       <button id="next" type="button">Next</button>
     </div>
@@ -316,9 +329,11 @@ async function runQuery(skip) {
   try {
     const limit = Math.min(1000, Math.max(1, parseInt($("limit").value, 10) || 50));
     $("limit").value = limit;
-    const data = await api("find", { ...queryBody(), skip, limit });
+    const query = queryBody();
+    const data = await api("find", { ...query, skip, limit });
     if (seq !== state.seq) return;
-    Object.assign(state, { docs: data.docs, hasMore: data.has_more, skip });
+    // Count and export use the query whose results are on screen, not unsaved edits.
+    Object.assign(state, { docs: data.docs, hasMore: data.has_more, skip, query });
     $("count").textContent = "Count matches";
     $("count").disabled = false;
     render();
@@ -336,19 +351,49 @@ $("query").onsubmit = event => {
 $("prev").onclick = () => runQuery(Math.max(0, state.skip - (parseInt($("limit").value, 10) || 50)));
 $("next").onclick = () => runQuery(state.skip + state.docs.length);
 
-$("count").onclick = async () => {
+// Returns { count, estimated }, or null if counting failed.
+async function countMatches() {
   const button = $("count");
   button.disabled = true;
   button.textContent = "Counting…";
   try {
-    const { count, estimated } = await api("count", queryBody());
-    button.textContent = (estimated ? "About " : "") + count.toLocaleString() + (count === 1 ? " match" : " matches");
+    const result = await api("count", state.query);
+    button.textContent = (result.estimated ? "About " : "") + result.count.toLocaleString() + (result.count === 1 ? " match" : " matches");
+    return result;
   } catch (err) {
     button.textContent = "Count matches";
     button.disabled = false;
     showError("query-error", err.message);
+    return null;
   }
-};
+}
+
+$("count").onclick = countMatches;
+
+async function exportAll(format) {
+  $("download-menu").open = false;
+  showError("query-error", "");
+  const result = await countMatches();
+  const size = result ? (result.estimated ? "about " : "") + result.count.toLocaleString() : "all matching";
+  const question = `Export ${size} documents from ${state.db} / ${state.coll} as ${format.toUpperCase()}?\n\n` +
+    "Large exports can take a while and use a lot of Cosmos DB request units. Your browser's downloads list shows progress." +
+    (format === "csv" ? " A CSV file only starts filling once the whole query has run." : "");
+  if (!confirm(question)) return;
+  try {
+    const { token } = await api("export", { ...state.query, format });
+    el("a", { href: "/api/export/" + token, download: "" }).click();
+  } catch (err) {
+    showError("query-error", err.message);
+  }
+}
+
+document.querySelectorAll(".export").forEach(button => {
+  button.onclick = () => exportAll(button.dataset.format);
+});
+
+document.addEventListener("click", event => {
+  if (!$("download-menu").contains(event.target)) $("download-menu").open = false;
+});
 
 /* ---------- Results ---------- */
 
@@ -357,7 +402,8 @@ $("view").onclick = () => {
   render();
 };
 
-$("download").onclick = () => {
+$("download-page").onclick = () => {
+  $("download-menu").open = false;
   const url = URL.createObjectURL(new Blob([JSON.stringify(state.docs, null, 2)], { type: "application/json" }));
   el("a", { href: url, download: state.db + "." + state.coll + ".json" }).click();
   setTimeout(() => URL.revokeObjectURL(url), 1000);
@@ -369,7 +415,7 @@ function render() {
   $("range").textContent = docs.length ? `Showing ${skip + 1}–${skip + docs.length}` : "No documents";
   $("prev").disabled = skip === 0;
   $("next").disabled = !hasMore;
-  $("download").disabled = !docs.length;
+  document.querySelectorAll("#download-menu button").forEach(b => { b.disabled = !docs.length; });
   $("view").textContent = view === "list" ? "Table view" : "List view";
   $("results").scrollTop = 0;
   if (!docs.length) {
